@@ -1,0 +1,126 @@
+# ============================================================
+#  校园二手交易平台 · Docker Compose 编排
+#  ------------------------------------------------------------
+#  用法:
+#    cp .env.example .env      # 修改密码与 JWT 密钥
+#    docker compose up -d --build
+#  或直接跑一键脚本:
+#    bash deploy.sh
+#
+#  说明:
+#   - mysql 与 app 在同一自定义网络里,app 通过服务名 mysql 访问数据库,
+#     因此 MySQL 不需要对公网暴露端口(更安全)
+#   - 只有 app 的 8080 端口映射到宿主机,前端页面与接口同源,无需处理跨域
+# ============================================================
+
+services:
+
+  mysql:
+    image: mysql:8.0
+    container_name: csh-mysql
+    restart: unless-stopped
+    # 硬上限:超了只杀这个容器,不会把整台机器拖垮
+    # 由 deploy.sh 按物理内存自动写入 .env(1G → 400m,2G → 800m,4G → 1500m)
+    # 默认值特意取 1G 档:即使有人绕过脚本直接 up,最多是慢,不会 OOM
+    mem_limit: ${MYSQL_MEM_LIMIT:-400m}
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 .env 中设置 MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME:-campus_second_hand}
+      TZ: Asia/Shanghai
+      # 容器默认 locale 是 C,会让初始化用的 mysql 客户端把字符集判成 latin1,
+      # 中文种子数据入库即乱码。显式给 UTF-8 locale,与 schema.sql 里的 SET NAMES 双保险。
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_general_ci
+      - --default-time-zone=+08:00
+      # ---------- 小内存机型调优 ----------
+      # 默认 max-connections=151 会预留大量线程栈内存。由 .env 控制:
+      #   1G → 50   2G → 100   4G → 150   8G → 200
+      - --max-connections=${MYSQL_MAX_CONN:-50}
+      # 缓冲池是 MySQL 内存大户。由 .env 的 MYSQL_BUFFER_POOL 控制:
+      #   1G 机型 → 64M   2G 机型 → 128M   4G 以上 → 256M
+      - --innodb-buffer-pool-size=${MYSQL_BUFFER_POOL:-64M}
+      # 8.0 默认 chunk 128M,缓冲池小于 128M 时必须一起调小,否则启动会警告
+      - --innodb-buffer-pool-chunk-size=${MYSQL_BUFFER_POOL_CHUNK:-32M}
+      # 单实例缓冲池:避免多实例各自的空闲链表与预读开销
+      - --innodb-buffer-pool-instances=1
+      # 性能采集默认开启,常驻约 150-200MB,小机器上关掉能省出一整个 JVM 的堆
+      - --performance-schema=OFF
+      # 演示站不需要主从复制 / 时间点恢复,关掉 binlog 再省约 80MB 内存和磁盘
+      - --skip-log-bin
+      # 跳过连接时的反向 DNS 解析,省内存也省掉每次连接的一次查询
+      - --skip-name-resolve
+      - --innodb-log-buffer-size=8M
+      - --table-open-cache=${MYSQL_TABLE_CACHE:-64}
+      - --key-buffer-size=8M
+      - --thread-cache-size=4
+      # 刷盘线程与 IO 线程各减到 1:这台机器并发极低,少一个线程就少一份栈内存
+      - --innodb-page-cleaners=1
+      - --innodb-read-io-threads=1
+      - --innodb-write-io-threads=1
+      # fsync 比 O_DIRECT 在小内存机器上更稳(不绕过页缓存,不会因内存紧张而抖动)
+      - --innodb-flush-method=fsync
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # 首次启动(数据目录为空)时自动执行建表 + 初始化数据。
+      # 想重新初始化:docker compose down -v 后再起(会清空数据!)
+      - ./src/main/resources/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      # mysqladmin ping 成功才说明 MySQL 真正可接受连接,app 会等这个条件
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot --password=\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+  app:
+    build:
+      context: .
+      # Dockerfile     = 服务器上完整编译(需 4G 内存 + 3-8 分钟)
+      # Dockerfile.jar = 只跑本地打好的 jar(2G 内存够用 + 10 秒构建)
+      # deploy.sh 会自动检测 target/*.jar 并帮你选好
+      dockerfile: ${DOCKERFILE:-Dockerfile}
+    container_name: csh-app
+    restart: unless-stopped
+    # 由 deploy.sh 按内存自动写入:1G → 440m,2G → 700m,4G → 1280m
+    mem_limit: ${APP_MEM_LIMIT:-440m}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SERVER_PORT: 8080
+      # 时区:镜像里不再安装系统 tzdata(省掉 apt-get),Java 直接读 TZ 环境变量
+      TZ: Asia/Shanghai
+      # 容器间通信用服务名,不要写成 localhost
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:-campus_second_hand}
+      DB_USER: root
+      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?请在 .env 中设置 JWT_SECRET(至少 32 字符)}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-86400}
+      UPLOAD_PATH: /app/upload/
+      # 默认取 1G 档:本项目空载堆约 110-150MB,192m 够用且不会撑爆容器上限。
+      # deploy.sh 会按实际内存覆盖成更大的值(2G → 384m,4G → 768m)。
+      JAVA_TOOL_OPTIONS: ${JAVA_OPTS:--Xms96m -Xmx192m -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=48m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -XX:+ExitOnOutOfMemoryError -Dfile.encoding=UTF-8}
+    ports:
+      # 左边是宿主机端口(公网访问用),右边固定为容器内 8080
+      - "${APP_PORT:-8080}:8080"
+    volumes:
+      # 用户上传的商品图片/头像持久化,重建容器不丢
+      - upload-data:/app/upload
+    healthcheck:
+      # 用 bash 的 /dev/tcp 探测端口,不依赖 curl(镜像里刻意没装,省掉 apt-get 那一步)
+      # 应用连不上数据库会在启动阶段就退出,所以「端口通了」等价于「服务可用」
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+
+volumes:
+  mysql-data:
+  upload-data:
