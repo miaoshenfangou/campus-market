@@ -1,0 +1,61 @@
+server:
+  # 允许通过环境变量覆盖端口(Docker 部署时统一用 8080,本地可用 --server.port 覆盖)
+  port: ${SERVER_PORT:8080}
+
+spring:
+  # 数据库配置
+  datasource:
+    url: jdbc:mysql://localhost:3306/campus_second_hand?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: root
+    password: 123456
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  # 文件上传配置
+  servlet:
+    multipart:
+      # 单张上限 10MB(商品图业务层再收紧到 5MB),整个请求 32MB
+      # 之所以要给到 32MB:一次最多 5 张图,5×5MB=25MB 再加表单字段,
+      # 20MB 的默认值会在最后一张图时直接抛 MaxUploadSizeExceededException。
+      max-file-size: 10MB
+      max-request-size: 32MB
+      enabled: true
+  mvc:
+    pathmatch:
+      matching-strategy: ant_path_matcher
+
+  # 静态资源映射
+  # 关键:列表里必须保留 classpath:/static/,否则打包进 jar 的前端页面(首页)访问不到 404;
+  # 同时保留 file: 上传目录,商品图片与头像才能被浏览器直接访问。
+  web:
+    resources:
+      static-locations:
+        - classpath:/static/
+        - file:${user.dir}/upload/
+
+  # Redis缓存配置（pom引入redis依赖必须保留）
+  redis:
+    host: 127.0.0.1
+    port: 6379
+    password:
+    database: 0
+
+# MyBatis-Plus配置
+mybatis-plus:
+  type-aliases-package: com.lanou.csh.entity
+  mapper-locations: classpath*:/mapper/*.xml
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    map-underscore-to-camel-case: true
+
+# JWT配置
+jwt:
+  secret: "256bitsecretyour256bitsecretyour256bitsecret"
+  expiration: 86400
+  issuer: campus-second-hand
+
+# 自定义文件上传路径
+file:
+  upload:
+    path: ${user.dir}/upload/
+    product-image-path: ${file.upload.path}product-images/
+    avatar-path: ${file.upload.path}avatar/
