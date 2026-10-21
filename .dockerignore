@@ -1,0 +1,17 @@
+# 构建镜像时不需要打进上下文的东西,减小上传体积、加快构建
+
+# target/ 里只有 jar 有用:用 target/* 逐项排除(别写 target/,否则 ! 无法重新包含),
+# 再用 ! 把打好的 jar 捞回来,供轻量模式 Dockerfile.jar 使用
+target/*
+!target/csh-0.0.1-SNAPSHOT.jar
+
+upload/
+.git/
+.gitignore
+.idea/
+*.iml
+*.log
+*.md
+.env
+docker-compose.yml
+deploy.sh
