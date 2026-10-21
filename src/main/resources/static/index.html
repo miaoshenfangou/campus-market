@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>校园二手交易平台</title>
+  <meta name="description" content="校园二手交易平台 —— Spring Boot + MyBatis-Plus + MySQL + JWT 实现的二手交易系统">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" href="/favicon-32x32.png" type="image/png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <meta name="theme-color" content="#12925c">
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="container topbar__inner">
+    <a class="brand" href="/">
+      <span class="brand__mark">二手</span>
+      <span class="brand__text">校园二手<em>交易平台</em></span>
+    </a>
+
+    <nav class="nav">
+      <button class="nav__item is-active" data-view="home">首页</button>
+      <button class="nav__item" data-view="favorites">我的收藏</button>
+      <button class="nav__item" data-view="mine">我发布的</button>
+      <!-- 审核台:仅审核员可见,由 app.js 根据 user.role 控制 -->
+      <button class="nav__item" data-view="audit" id="navAudit" hidden>审核台</button>
+    </nav>
+
+    <div class="topbar__right" id="authArea">
+      <!-- 登录状态由 JS 渲染 -->
+    </div>
+  </div>
+</header>
+
+<main class="container main">
+
+  <!-- 轮播横幅:数据来自 /banner/list -->
+  <section class="banners" id="banners"></section>
+
+  <!-- 筛选栏:严格对应后端 /product/list 支持的参数(keyword / categoryId / 分页) -->
+  <section class="filter" id="filterBar">
+    <div class="search">
+      <span class="search__icon">🔍</span>
+      <input id="searchInput" type="search" placeholder="搜索商品标题,例如:耳机、教材、羽毛球拍" autocomplete="off">
+    </div>
+    <div class="chips" id="categoryChips"></div>
+  </section>
+
+  <div class="section-head">
+    <h2 id="listTitle">最新上架</h2>
+    <span class="muted" id="listMeta"></span>
+  </div>
+
+  <div id="listArea"></div>
+  <div class="pager" id="pager"></div>
+
+</main>
+
+<footer class="footer">
+  <div class="container footer__inner">
+    <div>
+      校园二手交易平台 · Spring Boot 4 + MyBatis-Plus + MySQL 8 + JWT
+      <span class="muted">|</span>
+      <a href="/doc.html" target="_blank" rel="noopener">接口文档</a>
+    </div>
+    <div class="footer__links">
+      <a href="/v3/api-docs" target="_blank" rel="noopener">OpenAPI JSON</a>
+    </div>
+  </div>
+</footer>
+
+<!-- 通用弹层 -->
+<div class="modal" id="modal" hidden>
+  <div class="modal__mask" data-close="1"></div>
+  <div class="modal__body" id="modalBody"></div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="/assets/app.js"></script>
+</body>
+</html>
