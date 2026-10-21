@@ -1,0 +1,60 @@
+# ============================================================
+#  生产环境配置(Docker 部署使用)
+#  激活方式:环境变量 SPRING_PROFILES_ACTIVE=prod
+#  所有敏感项均通过环境变量注入,不写死在代码库里
+# ============================================================
+server:
+  port: ${SERVER_PORT:8080}
+  # 若后续在应用前挂 Nginx,需要靠它还原真实的协议与客户端 IP
+  forward-headers-strategy: framework
+  tomcat:
+    # 小内存机型必须收窄线程池。默认 max=200,每个线程预留 1MB 栈空间,
+    # 光线程栈的虚拟内存占用就接近 200MB。演示站 50 并发绰绰有余。
+    # 由 deploy.sh 按物理内存写入 .env(1G → 30,2G → 50,4G → 100)
+    threads:
+      max: ${TOMCAT_MAX_THREADS:50}
+      min-spare: ${TOMCAT_MIN_SPARE:5}
+    max-connections: ${TOMCAT_MAX_CONNECTIONS:200}
+    accept-count: 50
+
+spring:
+  datasource:
+    # 注意:容器之间用服务名互相访问,DB_HOST 在 docker-compose 里指向 mysql 服务
+    url: jdbc:mysql://${DB_HOST:mysql}:${DB_PORT:3306}/${DB_NAME:campus_second_hand}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${DB_USER:root}
+    password: ${DB_PASSWORD:change-me}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      # 小内存机器上连接池不要开太大:每个 MySQL 连接在服务端也要占内存,
+      # 池子空闲连接同样会拖住 MySQL。由 deploy.sh 按内存写入(1G → 3,2G → 5)
+      maximum-pool-size: ${DB_POOL_SIZE:5}
+      minimum-idle: 2
+      connection-timeout: 10000
+      # 空闲连接回收,避免 MySQL 端长期挂着无用连接
+      idle-timeout: 300000
+      max-lifetime: 1200000
+
+  # 覆盖父配置:必须同时保留 classpath:/static/(前端页面)与上传目录(商品图片)
+  web:
+    resources:
+      static-locations:
+        - classpath:/static/
+        - file:${file.upload.path}
+
+mybatis-plus:
+  configuration:
+    # 生产环境关闭 SQL 控制台打印:避免日志膨胀,也不把 SQL 结构写进日志
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+
+jwt:
+  # 由部署脚本自动生成并写入 .env,切勿使用仓库里的示例值上线
+  secret: ${JWT_SECRET}
+  expiration: ${JWT_EXPIRATION:86400}
+  issuer: campus-second-hand
+
+file:
+  upload:
+    # 容器内固定为 /app/upload/,由 docker volume 持久化,重建容器不丢图片
+    path: ${UPLOAD_PATH:/app/upload/}
+    product-image-path: ${file.upload.path}product-images/
+    avatar-path: ${file.upload.path}avatar/
