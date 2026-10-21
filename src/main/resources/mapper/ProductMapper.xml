@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.lanou.csh.mapper.ProductMapper">
+
+    <!--
+      商品列表复合查询:关键词 + 分类筛选,联表带出分类名、卖家信息、主图。
+
+      相比原实现修正了三处:
+      1. 去掉了 LIMIT #{(query.pageNum - 1) * query.pageSize} ——
+         #{} 占位符内不能做算术运算,SQL 必然报错;分页改由
+         MyBatis-Plus 的 PaginationInnerInterceptor 自动拼接。
+      2. 字段名与建表脚本对齐:category.name(不是 category_name)、
+         product_image.image_url(不是 img_url)、主图按 sort_order 最小值判定
+         (而不是不存在的 is_main 字段)。
+      3. 未登录时用 1 = 0 作为 JOIN 条件,避免 #{query.loginUserId} 为 null
+         导致 favorite 关联出错误结果。
+    -->
+    <select id="selectProductList" resultType="com.lanou.csh.dto.ProductVO">
+        SELECT
+            p.id,
+            p.user_id          AS userId,
+            p.category_id      AS categoryId,
+            p.title,
+            p.price,
+            p.original_price   AS originalPrice,
+            p.status,
+            p.view_count       AS viewCount,
+            p.create_time      AS createTime,
+            c.name             AS categoryName,
+            u.username         AS username,
+            u.avatar           AS avatar,
+            pi.image_url       AS mainImage,
+            CASE WHEN f.id IS NOT NULL THEN 1 ELSE 0 END AS isFavorite
+        FROM product p
+        LEFT JOIN category c       ON p.category_id = c.id
+        LEFT JOIN `user` u         ON p.user_id = u.id
+        LEFT JOIN product_image pi ON pi.product_id = p.id
+             AND pi.sort_order = (
+                 SELECT MIN(pi2.sort_order) FROM product_image pi2 WHERE pi2.product_id = p.id
+             )
+        <choose>
+            <when test="query.loginUserId != null">
+                LEFT JOIN favorite f ON f.product_id = p.id AND f.user_id = #{query.loginUserId}
+            </when>
+            <otherwise>
+                LEFT JOIN favorite f ON 1 = 0
+            </otherwise>
+        </choose>
+        WHERE p.status = 1
+        <if test="query.categoryId != null">
+            AND p.category_id = #{query.categoryId}
+        </if>
+        <if test="query.keyword != null and query.keyword != ''">
+            AND p.title LIKE CONCAT('%', #{query.keyword}, '%')
+        </if>
+        ORDER BY p.create_time DESC
+    </select>
+
+</mapper>
