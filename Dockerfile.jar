@@ -1,0 +1,46 @@
+# ============================================================
+#  校园二手交易平台 · 轻量运行镜像(不编译,直接跑已打好的 jar)
+#  ------------------------------------------------------------
+#  为什么需要这个:
+#    在 1核1G / 2核2G 的服务器里跑 Maven 构建,Maven + javac 峰值内存常超过 1G,
+#    很容易被内核 OOM Killer 杀掉,表现为「构建到一半莫名失败」。
+#    用这个 Dockerfile,服务器只做镜像组装,不装 JDK/Maven,
+#    构建耗时从 3-8 分钟降到 10 秒以内,内存占用不到 100MB。
+#
+#  刻意不做 apt-get:
+#    国内云服务器访问 archive.ubuntu.com 很慢,apt 这一步经常卡几分钟甚至失败。
+#    而时区并不依赖系统 tzdata —— Java 自带 TZDB,靠 -Duser.timezone 即可;
+#    健康检查改用 bash 的 /dev/tcp,不需要 curl。整个构建只有一次 COPY。
+#
+#  用法(本地先打包,再上传):
+#    ./mvnw clean package -DskipTests
+#    把 target/csh-0.0.1-SNAPSHOT.jar 和本文件一起传到服务器,然后:
+#    docker build -f Dockerfile.jar -t csh-app .
+#
+#  部署脚本 deploy.sh 会自动检测:存在 target/*.jar 时优先用本文件。
+# ============================================================
+
+FROM eclipse-temurin:17-jre-jammy
+
+WORKDIR /app
+
+# 只拷 jar,不拷源码
+COPY target/csh-0.0.1-SNAPSHOT.jar app.jar
+
+RUN mkdir -p /app/upload/product-images /app/upload/avatar \
+    && groupadd -r app && useradd -r -g app -d /app app \
+    && chown -R app:app /app
+
+USER app
+
+EXPOSE 8080
+
+# 时区同时设置系统变量与 JVM 参数:日志、LocalDateTime.now()、JDBC 都会走东八区
+ENV TZ=Asia/Shanghai \
+    JAVA_TOOL_OPTIONS="-Xms96m -Xmx192m -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=48m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -XX:+ExitOnOutOfMemoryError -Duser.timezone=Asia/Shanghai -Dfile.encoding=UTF-8"
+
+# 用 bash 的 /dev/tcp 探测端口,避免为了 curl 而引入 apt 依赖
+HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=6 \
+    CMD bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080' || exit 1
+
+ENTRYPOINT ["java", "-jar", "/app/app.jar"]
